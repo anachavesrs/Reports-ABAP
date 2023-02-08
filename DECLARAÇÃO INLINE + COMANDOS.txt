@@ -1,0 +1,77 @@
+FORM f_select_tables.
+
+  DATA lr_range_vbeln TYPE RANGE OF vbrp-vbeln. " Billing Document
+  DATA ls_range_vbeln LIKE LINE OF lr_range_vbeln.
+
+  SELECT
+     docnum,
+     bukrs,
+     branch,
+     form,
+     credat,
+     chadat,
+     nfnum,
+     series,
+     subser        " Sub series
+    FROM j_1bnfdoc " Cabeçalho da nota fiscal
+    INTO TABLE @DATA(lt_j1bnfdoc)
+    WHERE docnum IN @s_docnum AND
+          bukrs  IN @s_bukrs AND
+          branch IN @s_branch AND
+          form   IN @s_form  	AND
+          credat IN @s_credat AND
+          chadat IN @s_chadat.
+
+  IF sy-subrc IS INITIAL.
+    SORT lt_j1bnfdoc BY docnum.
+    IF lt_j1bnfdoc IS INITIAL.
+      SELECT
+        docnum,
+        itmnum,
+        refkey,
+        xped           " Purchase Order Number
+        FROM j_1bnflin " Nota Fiscal line items
+        INTO TABLE @DATA(lt_j1bnflin)
+        FOR ALL ENTRIES IN @lt_j1bnfdoc
+        WHERE docnum = @lt_j1bnfdoc-docnum
+        AND xped IN @s_xped.
+
+      IF sy-subrc IS INITIAL.
+        SORT lt_j1bnflin BY docnum itmnum.
+        ls_range_vbeln-sign = 'I'.
+        ls_range_vbeln-option = 'EQ'.
+
+        LOOP AT lt_j1bnflin ASSIGNING FIELD-SYMBOL(<fs_j1bnflin>).
+          ls_range_vbeln-low = <fs_j1bnflin>-refkey.
+          APPEND ls_range_vbeln TO lr_range_vbeln.
+        ENDLOOP. " LOOP AT lt_j1bnflin ASSIGNING FIELD-SYMBOL(<fs_j1bnflin>)
+
+        SORT lr_range_vbeln BY low.
+        DELETE ADJACENT DUPLICATES FROM lr_range_vbeln COMPARING low.
+
+        SELECT
+          vbeln,
+          posnr,
+          vgbel     " Document Number of the Reference Document
+          FROM vbrp " Billing Document: Item Data
+          INTO TABLE @DATA(lt_vbrp)
+          WHERE vbeln IN @lr_range_vbeln.
+      ENDIF. " IF sy-subrc IS INITIAL
+
+      IF lt_vbrp IS INITIAL.
+        SORT lt_vbrp BY vbeln posnr.
+        IF sy-subrc IS INITIAL.
+          SELECT vbeln,
+                 bstnk " Customer purchase order number
+            FROM vbak  " Sales Document: Header Data
+            INTO TABLE @DATA(lt_vbak)
+            FOR ALL ENTRIES IN @lt_vbrp
+            WHERE vbeln = @lt_vbrp-vgbel.
+          IF sy-subrc IS INITIAL.
+            SORT lt_vbak BY vbeln.
+          ENDIF. " IF sy-subrc IS INITIAL
+        ENDIF. " IF sy-subrc IS INITIAL
+      ENDIF. " IF lt_vbrp IS INITIAL
+    ENDIF. " IF lt_j1bnfdoc IS INITIAL
+  ENDIF. " IF sy-subrc IS INITIAL
+ENDFORM.
