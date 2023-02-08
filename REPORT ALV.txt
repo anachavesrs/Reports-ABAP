@@ -1,0 +1,544 @@
+
+*&---------------------------------------------------------------------*
+*& Report ZRALV2
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+REPORT zralv2.
+
+INCLUDE zravl2_top.
+
+*&---------------------------------------------------------------------*
+*& Include          ZRAVL2_TOP
+*&---------------------------------------------------------------------*
+
+TABLES: ekko, ekpo, ztrei2, sscrfields.
+TYPE-POOLS: slis.
+
+DATA: objeto TYPE REF TO cl_gui_alv_grid,
+      grid   TYPE REF TO  cl_gui_custom_container.
+DATA: it_fcat TYPE TABLE OF  lvc_s_fcat,
+      wa_fcat LIKE LINE OF it_fcat.
+DATA: wa_layout TYPE lvc_s_layo.
+
+
+TYPES: BEGIN OF ty_ekko,
+         ebeln TYPE ekko-ebeln,    " Documento de compras
+         bukrs TYPE ekko-bukrs,    " Empresa
+         aedat TYPE ekko-aedat,    " Data de criação
+         ernam TYPE ekko-ernam,    " Responsavel
+       END OF ty_ekko.
+
+TYPES: BEGIN OF ty_ekpo,
+         ebeln TYPE ekpo-ebeln,    " Documento de compras
+         ebelp TYPE ekpo-ebelp,    " Item
+         matnr TYPE ekpo-matnr,    " Material
+         werks TYPE ekpo-werks,    " Centro
+
+       END OF ty_ekpo.
+
+TYPES: BEGIN OF ty_ekko_ekpo,
+         ebeln TYPE ekko-ebeln,    " Documento de compras
+         bukrs TYPE ekko-bukrs,    " Empresa
+         aedat TYPE ekko-aedat,    " Data de criação
+         ernam TYPE ekko-ernam,    " Responsavel
+         ebelp TYPE ekpo-ebelp,    " Item
+         matnr TYPE ekpo-matnr,    " Material
+         werks TYPE ekpo-werks,    " Centro
+       END OF ty_ekko_ekpo.
+
+DATA: it_tabaux TYPE TABLE OF ztrei2.
+DATA: wa_tabaux LIKE LINE OF it_tabaux.
+
+DATA: it_tabaux2 TYPE TABLE OF ztrei2.
+DATA: wa_tabaux2 LIKE LINE OF it_tabaux2.
+
+DATA: it_ztrei TYPE TABLE OF ztrei2.
+DATA: wa_ztrei LIKE LINE OF it_ztrei.
+
+data: it_insert_tabelaz TYPE table of ztrei2,
+      wa_insert_tabelaz like line of it_insert_tabelaz.
+
+
+DATA: it_ekko TYPE TABLE OF ty_ekko,
+      wa_ekko LIKE LINE OF it_ekko.
+
+DATA: it_ekpo TYPE TABLE OF ty_ekpo,
+      wa_ekpo LIKE LINE OF it_ekpo.
+
+DATA: it_ekko_ekpo TYPE TABLE OF ty_ekko_ekpo,
+      wa_ekko_ekpo LIKE LINE OF it_ekko_ekpo.
+
+DATA: ok_code LIKE sy-ucomm.
+
+DATA does_exist TYPE abap_bool.
+
+DATA: lv_resposta TYPE c.
+
+DATA: index_rows TYPE lvc_t_row,
+      wa_index      LIKE LINE OF index_rows.
+
+DATA: wa_ekko_ekpo2 LIKE LINE OF it_ekko_ekpo.
+
+DATA: lt_select_rows TYPE TABLE OF ty_ekko_ekpo,
+      ls_select like LINE Of lt_select_rows.
+
+
+
+
+
+INCLUDE zralv2_sel.
+
+*&---------------------------------------------------------------------*
+*& Include          ZRALV2_SEL
+*&---------------------------------------------------------------------*
+
+"Blocos na tela
+*SELECTION-SCREEN BEGIN OF BLOCK doc WITH FRAME.
+*  SELECT-OPTIONS: lv_doc FOR ekko-ebeln OBLIGATORY.
+*SELECTION-SCREEN END OF BLOCK doc.
+
+"Subtelas
+
+SELECTION-SCREEN BEGIN OF SCREEN 102 AS SUBSCREEN.
+  SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME.
+    SELECT-OPTIONS: lv_doc FOR ekko-ebeln.
+    SELECT-OPTIONS: lv_item FOR ekpo-ebelp.
+    SELECT-OPTIONS: lv_data FOR ekko-aedat.
+  SELECTION-SCREEN END OF BLOCK b1.
+  SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME.
+    SELECT-OPTIONS: lv_resp FOR ekko-ernam NO INTERVALS NO-EXTENSION.
+  SELECTION-SCREEN END OF BLOCK b2.
+SELECTION-SCREEN END OF SCREEN 102.
+
+SELECTION-SCREEN BEGIN OF SCREEN 103 AS SUBSCREEN.
+
+  SELECTION-SCREEN BEGIN OF BLOCK b3 WITH FRAME.
+
+    PARAMETERS: zebeln   TYPE ztrei2-ebeln,
+                zbukrs   TYPE ztrei2-bukrs,
+                zaedat   TYPE ztrei2-aedat,
+                zernam   TYPE ztrei2-ernam,
+                zebelp   TYPE ztrei2-ebelp,
+                zmatnr   TYPE ztrei2-matnr,
+                zwerks   TYPE ztrei2-werks.
+
+
+  SELECTION-SCREEN END OF BLOCK b3.
+  SELECTION-SCREEN PUSHBUTTON /1(15) mod_btn USER-COMMAND modify.
+  SELECTION-SCREEN PUSHBUTTON /1(15) limpar USER-COMMAND limpar.
+
+SELECTION-SCREEN END OF SCREEN 103.
+
+SELECTION-SCREEN BEGIN OF TABBED BLOCK tab_screen FOR 15 LINES.
+  SELECTION-SCREEN TAB (20) tab1 USER-COMMAND comm1 DEFAULT SCREEN 102.
+  SELECTION-SCREEN TAB (20) tab2 USER-COMMAND comm2 DEFAULT SCREEN 103.
+SELECTION-SCREEN END OF BLOCK tab_screen.
+
+
+
+
+
+SELECT ebeln bukrs aedat ernam
+      FROM ekko
+        INTO TABLE it_ekko
+        WHERE ebeln IN lv_doc
+  AND aedat IN lv_data.
+
+IF sy-subrc IS INITIAL.
+  SELECT ebeln ebelp matnr werks "#EC CI_NO_TRANSFORM
+    FROM ekpo
+    INTO TABLE it_ekpo
+    FOR ALL ENTRIES IN it_ekko
+    WHERE ebeln = it_ekko-ebeln
+    AND ebelp IN lv_item.
+ELSE.
+  MESSAGE 'Valor não encontrado' TYPE 'S' DISPLAY LIKE 'E'.
+  STOP.
+ENDIF.
+
+*loop na tabela inerna carregada pelo select que vai adicionar as linhas dela em outra tabela interna.
+LOOP AT it_ekko INTO wa_ekko.
+  READ TABLE it_ekpo INTO wa_ekpo WITH KEY ebeln = wa_ekko-ebeln.
+  CLEAR wa_ekko_ekpo.
+  wa_ekko_ekpo-ebeln = wa_ekko-ebeln.
+  wa_ekko_ekpo-bukrs = wa_ekko-bukrs.
+  wa_ekko_ekpo-aedat = wa_ekko-aedat.
+  wa_ekko_ekpo-ernam = wa_ekko-ernam.
+  wa_ekko_ekpo-ebelp = wa_ekpo-ebelp.
+  wa_ekko_ekpo-matnr = wa_ekpo-matnr.
+  wa_ekko_ekpo-werks = wa_ekpo-werks.
+
+  APPEND wa_ekko_ekpo TO it_ekko_ekpo.
+ENDLOOP.
+
+*chamando a tela 100 criada
+CALL SCREEN 100.
+
+
+INITIALIZATION.
+  tab1 = '@4G@ Filtrar' .
+  tab2 = '@17@Inserir' .
+  mod_btn = '@2L@Salvar'.
+  limpar = '@0Z@Limpar'.
+
+AT SELECTION-SCREEN.
+  CASE sy-ucomm.
+    WHEN 'MODIFY'.
+      PERFORM insert_tabelaz.
+     WHEN 'LIMPAR'.
+        CLEAR: zebeln, zbukrs, zaedat, zernam, zebelp, zmatnr, zwerks.
+  ENDCASE.
+
+
+*&---------------------------------------------------------------------*
+*& Module STATUS_0100 OUTPUT
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+MODULE status_0100 OUTPUT.
+  SET PF-STATUS 'STATUS100'.
+  SET TITLEBAR 'TITLE100'.
+ENDMODULE.
+
+*&---------------------------------------------------------------------*
+*&      Module  USER_COMMAND_0100  INPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE user_command_0100 INPUT.
+  CASE ok_code.
+    WHEN 'BACK'.
+      LEAVE TO SCREEN 0.
+    WHEN 'SAVE'.
+      PERFORM select_ztrei.
+  ENDCASE.
+
+ENDMODULE.
+
+
+*&---------------------------------------------------------------------*
+*& Module MOSTRARALV OUTPUT
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+MODULE mostraralv OUTPUT.
+
+  IF objeto IS BOUND.
+    objeto->free( ).
+  ENDIF.
+
+  IF grid IS NOT BOUND.
+
+    CREATE OBJECT grid
+      EXPORTING
+        container_name = 'CC_ALV'.
+  ENDIF.
+
+  CREATE OBJECT objeto
+    EXPORTING
+      i_parent = grid.
+  IF sy-subrc <> 0.
+*       MESSAGE ID SY-MSGID TYPE SY-MSGTY NUMBER SY-MSGNO
+*                  WITH SY-MSGV1 SY-MSGV2 SY-MSGV3 SY-MSGV4.
+  ENDIF.
+
+  PERFORM set_field_catalog.
+  PERFORM set_layout.
+
+  CALL METHOD objeto->set_table_for_first_display
+    EXPORTING
+*     i_buffer_active =
+*     i_bypassing_buffer            =
+*     i_consistency_check           =
+*     i_structure_name              =
+*     is_variant      =
+*     i_save          =
+*     i_default       = 'X'
+      is_layout       = wa_layout
+*     is_print        =
+*     it_special_groups             =
+*     it_toolbar_excluding          =
+*     it_hyperlink    =
+*     it_alv_graphics =
+*     it_except_qinfo =
+*     ir_salv_adapter =
+    CHANGING
+      it_outtab       = it_ekko_ekpo
+      it_fieldcatalog = it_fcat.
+  IF sy-subrc <> 0.
+* Implement suitable error handling here
+  ENDIF.
+
+  CALL METHOD objeto->refresh_table_display
+    EXPORTING
+      i_soft_refresh = 'X'.
+
+ENDMODULE.
+
+FORM set_field_catalog.
+  CLEAR it_fcat.
+  CLEAR wa_fcat.
+  wa_fcat-reptext = 'Doc. Compras'.
+  wa_fcat-fieldname = 'ebeln'.
+  wa_fcat-ref_table = 'ekko'.
+  wa_fcat-ref_field = 'ebeln'.
+  APPEND wa_fcat TO it_fcat.
+
+  wa_fcat-reptext = 'Empresa'.
+  wa_fcat-fieldname = 'bukrs'.
+  wa_fcat-ref_table = 'ekko'.
+  wa_fcat-ref_field = 'bukrs'.
+  APPEND wa_fcat TO it_fcat.
+
+  wa_fcat-reptext = 'Dt. Criação'.
+  wa_fcat-fieldname = 'aedat'.
+  wa_fcat-ref_table = 'ekko'.
+  wa_fcat-ref_field = 'aedat'.
+  APPEND wa_fcat TO it_fcat.
+
+  wa_fcat-reptext = 'Responsavel'.
+  wa_fcat-fieldname = 'ernam'.
+  wa_fcat-ref_table = 'ekko'.
+  wa_fcat-ref_field = 'ernam'.
+  APPEND wa_fcat TO it_fcat.
+
+  wa_fcat-reptext = 'Item'.
+  wa_fcat-fieldname = 'ebelp'.
+  wa_fcat-ref_table = 'ekpo'.
+  wa_fcat-ref_field = 'ebelp'.
+  APPEND wa_fcat TO it_fcat.
+
+  wa_fcat-reptext = 'Material'.
+  wa_fcat-fieldname = 'matnr'.
+  wa_fcat-ref_table = 'ekpo'.
+  wa_fcat-ref_field = 'matnr'.
+  APPEND wa_fcat TO it_fcat.
+
+  wa_fcat-reptext = 'Centro'.
+  wa_fcat-fieldname = 'werks'.
+  wa_fcat-ref_table = 'ekpo'.
+  wa_fcat-ref_field = 'werks'.
+  APPEND wa_fcat TO it_fcat.
+
+ENDFORM.
+
+FORM set_layout.
+  CLEAR wa_layout.
+  wa_layout-grid_title = 'Relatório de Controle de Pedido de Compras'.
+  wa_layout-cwidth_opt = 'x'.
+  wa_layout-sel_mode = 'D'.
+  wa_layout-zebra      = 'X'.
+ENDFORM.
+
+
+*Form que salva todos os dados na tabela z.
+FORM button_save.
+  LOOP AT it_ekko_ekpo INTO wa_ekko_ekpo.
+    wa_tabaux-mandt = sy-mandt.
+    wa_tabaux-ebeln = wa_ekko_ekpo-ebeln.
+    wa_tabaux-bukrs = wa_ekko_ekpo-bukrs.
+    wa_tabaux-aedat = wa_ekko_ekpo-aedat.
+    wa_tabaux-ernam = wa_ekko_ekpo-ernam.
+    wa_tabaux-ebelp = wa_ekko_ekpo-ebelp.
+    wa_tabaux-matnr = wa_ekko_ekpo-matnr.
+    wa_tabaux-werks = wa_ekko_ekpo-werks.
+    wa_tabaux-zdatamod = sy-datum.
+    wa_tabaux-zhoramod = sy-uzeit .
+    wa_tabaux-zusumod = sy-uname.
+    APPEND wa_tabaux TO it_tabaux.
+  ENDLOOP.
+  MODIFY ztrei2 FROM TABLE it_tabaux.
+  MESSAGE 'A Tabela ZTREI2 foi alterada com sucesso' TYPE 'S'.
+ENDFORM.
+
+FORM line_save.
+
+  LOOP AT lt_select_rows INTO ls_select.
+    wa_tabaux2-mandt = sy-mandt.
+    wa_tabaux2-ebeln = ls_select-ebeln.
+    wa_tabaux2-bukrs = ls_select-bukrs.
+    wa_tabaux2-aedat = ls_select-aedat.
+    wa_tabaux2-ernam = ls_select-ernam.
+    wa_tabaux2-ebelp = ls_select-ebelp.
+    wa_tabaux2-matnr = ls_select-matnr.
+    wa_tabaux2-werks = ls_select-werks.
+    wa_tabaux2-zdatamod = sy-datum.
+    wa_tabaux2-zhoramod = sy-uzeit .
+    wa_tabaux2-zusumod = sy-uname.
+    APPEND wa_tabaux2 TO it_tabaux2.
+  ENDLOOP.
+  MODIFY ztrei2 FROM TABLE it_tabaux2.
+  MESSAGE 'A Tabela ZTREI2 foi alterada com sucesso' TYPE 'S'.
+ENDFORM.
+
+
+FORM modify_save_nexistent.
+  LOOP AT it_ekko_ekpo INTO wa_ekko_ekpo.
+    READ TABLE it_ztrei INTO wa_ztrei WITH KEY ebeln = wa_ekko_ekpo-ebeln.
+    IF sy-subrc IS NOT INITIAL.
+      wa_tabaux-mandt = sy-mandt.
+      wa_tabaux-ebeln = wa_ekko_ekpo-ebeln.
+      wa_tabaux-bukrs = wa_ekko_ekpo-bukrs.
+      wa_tabaux-aedat = wa_ekko_ekpo-aedat.
+      wa_tabaux-ernam = wa_ekko_ekpo-ernam.
+      wa_tabaux-ebelp = wa_ekko_ekpo-ebelp.
+      wa_tabaux-matnr = wa_ekko_ekpo-matnr.
+      wa_tabaux-werks = wa_ekko_ekpo-werks.
+      wa_tabaux-zdatamod = sy-datum.
+      wa_tabaux-zhoramod = sy-uzeit .
+      wa_tabaux-zusumod = sy-uname.
+      APPEND wa_tabaux TO it_tabaux.
+    ENDIF.
+  ENDLOOP.
+  MODIFY ztrei2 FROM TABLE it_tabaux.
+  MESSAGE 'Somente dados que não existem foram salvos.' TYPE 'S'.
+ENDFORM.
+
+FORM modify_line_nexistent.
+  LOOP AT lt_select_rows INTO ls_select.
+    READ TABLE it_ztrei INTO wa_ztrei WITH KEY ebeln = ls_select-ebeln.
+    IF sy-subrc IS NOT INITIAL.
+      wa_tabaux-mandt = sy-mandt.
+      wa_tabaux-ebeln = ls_select-ebeln.
+      wa_tabaux-bukrs = ls_select-bukrs.
+      wa_tabaux-aedat = ls_select-aedat.
+      wa_tabaux-ernam = ls_select-ernam.
+      wa_tabaux-ebelp = ls_select-ebelp.
+      wa_tabaux-matnr = ls_select-matnr.
+      wa_tabaux-werks = ls_select-werks.
+      wa_tabaux-zdatamod = sy-datum.
+      wa_tabaux-zhoramod = sy-uzeit .
+      wa_tabaux-zusumod = sy-uname.
+      APPEND wa_tabaux TO it_tabaux.
+    ENDIF.
+  ENDLOOP.
+  MODIFY ztrei2 FROM TABLE it_tabaux.
+  IF sy-subrc IS INITIAL.
+    MESSAGE 'Somente dados que não existem foram salvos.' TYPE 'S'.
+  ENDIF.
+ENDFORM.
+
+*Form que será disprado quando eu clicar no botão salvar
+
+FORM select_ztrei.
+*declaração de tabela local
+
+  CLEAR index_rows. REFRESH index_rows.
+
+* Chamando o método que irá guardar as linhas seleciondas.
+  CALL METHOD objeto->get_selected_rows
+    IMPORTING
+      et_index_rows = index_rows.
+
+  CLEAR lt_select_rows. REFRESH lt_select_rows.
+  LOOP AT index_rows INTO wa_INDEX.
+    READ TABLE it_ekko_ekpo INTO wa_ekko_ekpo2 INDEX wa_index-index.
+    IF sy-subrc = 0.
+      ls_select-ebeln = wa_ekko_ekpo2-ebeln.
+      ls_select-bukrs = wa_ekko_ekpo2-bukrs.
+      ls_select-aedat = wa_ekko_ekpo2-aedat.
+      ls_select-ernam = wa_ekko_ekpo2-ernam.
+      ls_select-ebelp = wa_ekko_ekpo2-ebelp.
+      ls_select-matnr = wa_ekko_ekpo2-matnr.
+      ls_select-werks = wa_ekko_ekpo2-werks.
+      APPEND ls_select TO lt_select_rows.
+    ENDIF.
+  ENDLOOP.
+
+*Verificando se eu selecionei alguma linha da alv, ou seja, se minha tabela index_rows está carregada.
+
+  IF index_rows IS NOT INITIAL.
+* select para verificar se há dados já gravados na tabela Z comparando com
+* os dados da minha tabela interna onde estão guardadas as linhas selecionadas.
+    SELECT *
+    FROM ztrei2
+    INTO TABLE it_ztrei
+ FOR ALL ENTRIES IN lt_select_rows
+ WHERE ebeln = lt_select_rows-ebeln.
+
+  ELSE. "Se a index_rows NÃO estiver preenchida
+*faço um select comparando todos os dados filtrados com as chaves dos que já estão preenchidos na minha tabela Z
+    SELECT *
+        FROM ztrei2
+        INTO TABLE it_ztrei
+     FOR ALL ENTRIES IN it_ekko_ekpo
+     WHERE ebeln = it_ekko_ekpo-ebeln.
+  ENDIF.
+
+*Se o select deu certo, há registros iguais, eu chamo o popup perguntando se a pessoa deseja sobrepor os dados.
+  IF sy-subrc IS INITIAL.
+    CALL FUNCTION 'POPUP_TO_CONFIRM'
+      EXPORTING
+        titlebar       = 'Confirmar'
+        text_question  = 'Há dados selecionados já gravados na tabela ZTREI. Deseja sobprepor? Os demais serão gravados normalmente.'
+        text_button_1  = 'Sim'
+        text_button_2  = 'Não'
+        default_button = '1'
+      IMPORTING
+        answer         = lv_resposta
+      EXCEPTIONS
+        text_not_found = 1
+        OTHERS         = 2.
+*    Retorno do popup
+    CASE lv_resposta.
+*    caso a pessoa escolha sim:
+      WHEN '1'.
+        "Primeiro verifico se foi selecionada alguma linha. Se sim, salvo os dados:
+        IF index_rows IS NOT INITIAL .
+          PERFORM line_save.
+        ELSE.
+          "Agora, estou verificando se a pessoa clicou no botão salvar direto.
+          "Neste caso, chamo o perform que grava todos os dados normalmente.
+          PERFORM: button_save.
+        ENDIF.
+*    caso a pessoa escolha não:
+      WHEN '2'.
+        "Primeiro verifico se foi selecionada alguma linha na tela. Se sim, vou procurar os registros de chave igual e salvar apenas os que não
+        "estão gravados na tebla z.
+        IF lt_select_rows IS NOT INITIAL.
+          PERFORM modify_line_nexistent.
+          "verifico se a pessoa clicou em salvar direto e
+          "procuro os registros de chave igual para salvar apenas os que não
+          "estão gravados na tebla z.
+        ELSE.
+          PERFORM modify_save_nexistent.
+        ENDIF.
+    ENDCASE.
+*Se não encontar nenhum registro igual, n abre o popup,  vai seguir o caminho abaixo e salvar automaticamente.
+  ELSE.
+    "caso selecione alguma linha
+    IF lt_select_rows IS NOT INITIAL .
+      PERFORM line_save.
+      "caso aperte em gravar direto.
+    ELSE.
+      PERFORM: button_save.
+    ENDIF.
+  ENDIF.
+ENDFORM.
+
+FORM insert_tabelaz.
+
+  CLEAR it_insert_tabelaz. REFRESH it_insert_tabelaz.
+
+IF zebeln = ''.
+  MESSAGE 'Pelo menos o Documento de Compras deve estar preenchido para salvar.' TYPE 'E'.
+ELSE.
+  wa_insert_tabelaz-ebeln = zebeln.
+  wa_insert_tabelaz-bukrs = zbukrs.
+  wa_insert_tabelaz-aedat = zaedat.
+  wa_insert_tabelaz-ernam = zernam.
+  wa_insert_tabelaz-ebelp = zebelp.
+  wa_insert_tabelaz-matnr = zmatnr.
+  wa_insert_tabelaz-werks = zwerks.
+  wa_insert_tabelaz-zdatamod = sy-datum.
+  wa_insert_tabelaz-zhoramod = sy-uzeit.
+  wa_insert_tabelaz-zusumod = sy-uname.
+  APPEND wa_insert_tabelaz TO it_insert_tabelaz.
+  MODIFY ztrei2 FROM TABLE  it_insert_tabelaz.
+  IF sy-subrc IS INITIAL.
+    MESSAGE 'Os dados foram gravados com sucesso!' TYPE 'S'.
+  ENDIF.
+
+  ENDIF.
+ENDFORM.
