@@ -1,0 +1,21 @@
+*&---------------------------------------------------------------------*
+*& Report ZR_PREENCHE_DATA
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+REPORT zr_preenche_data.
+
+PARAMETERS: p_data TYPE dats.
+
+START-OF-SELECTION.
+
+WRITE p_data.
+
+AT SELECTION-SCREEN OUTPUT.
+  LOOP AT SCREEN.
+    IF screen-name = 'P_DATA'.
+      screen-input = 0.
+      p_data = sy-datum.
+      MODIFY SCREEN.
+    ENDIF.
+  ENDLOOP.
