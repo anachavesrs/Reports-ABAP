@@ -1,0 +1,233 @@
+*----------------------------------------------------------------------*
+*                             T-SYSTEMS                                *
+*----------------------------------------------------------------------*
+* Client.....: ALGAR                                                   *
+* Author.....: Ana Gabriela de Chaves / Pedro Zanchetta                *
+* Date.......: 26/01/2023                                              *
+* Description: Inserir Motivo de Recusa                                *
+* GAP........: TI-4852308
+* Request:     S4DK923834                                              *
+*----------------------------------------------------------------------*
+* Change log                                                           *
+*----------------------------------------------------------------------*
+* Author:                                 Date:                        *
+* Request:                                                             *
+* Description:                                                         *
+*&---------------------------------------------------------------------*
+
+
+REPORT zsd0007_ins_mot_recusa.
+TABLES: vbak.
+
+TYPES: BEGIN OF ty_vbak,
+         auart TYPE vbak-auart,    " Tipo de documento de venda
+         lfstk TYPE vbak-lfstk,    " Status de remessa
+         vbeln TYPE vbak-vbeln,
+         erdat TYPE vbak-erdat,
+       END OF ty_vbak,
+
+       BEGIN OF ty_auart,
+         auart TYPE vbak-auart,    " Tipo de documento de venda
+       END OF ty_auart,
+
+       BEGIN OF ty_abgru,
+         abgru TYPE vbap-abgru,
+       END OF ty_abgru,
+
+       BEGIN OF ty_vbap,
+         vbeln TYPE vbap-vbeln,
+         posnr TYPE vbap-posnr,
+         abgru TYPE vbap-abgru,
+       END OF ty_vbap.
+
+DATA: gs_auart TYPE ty_auart,
+      gt_auart TYPE TABLE OF ty_auart,
+      gt_vbak  TYPE TABLE OF ty_vbak,
+      gt_abgru TYPE TABLE OF ty_abgru,
+      gs_abgru TYPE ty_abgru,
+      gt_vbap  TYPE TABLE OF ty_vbap.
+
+
+SELECTION-SCREEN BEGIN OF BLOCK b3 WITH FRAME.
+
+  SELECT-OPTIONS: so_vbeln FOR vbak-vbeln,
+                  so_erdat FOR vbak-erdat.
+
+SELECTION-SCREEN END OF BLOCK b3.
+
+PERFORM seleciona_dados.
+IF gt_vbak IS NOT INITIAL.
+  PERFORM processar_dados.
+ELSE.
+  MESSAGE 'Nenhum registro encontrado para processamento' TYPE 'S'.
+ENDIF.
+
+
+*&---------------------------------------------------------------------*
+*& Form seleciona_dados
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+
+
+FORM seleciona_dados .
+
+  DATA: lv_data_in TYPE  p0001-begda.
+* busca na vbak os documentos do dia anterior e do dia atual quando processado via job
+  CALL FUNCTION 'RP_CALC_DATE_IN_INTERVAL'
+    EXPORTING
+      date      = sy-datum
+      days      = 1
+      months    = 0
+      signum    = '-'
+      years     = 0
+    IMPORTING
+      calc_date = lv_data_in.
+
+  IF sy-batch = 'X' AND so_erdat IS INITIAL.
+    so_erdat-option = 'BT'.
+    so_erdat-sign = 'I'.
+    so_erdat-low = lv_data_in.
+    so_erdat-high = sy-datum.
+    APPEND so_erdat.
+
+  ENDIF.
+
+  SELECT *
+  FROM tvarvc
+  INTO TABLE @DATA(lt_tvarvc)
+  WHERE name IN ('ZSD_AUTO_BLOCK_PARCIAL', 'ZSD_AUTO_MOT_RECUSA').
+
+  LOOP AT lt_tvarvc INTO DATA(ls_tvarvc).
+    CASE ls_tvarvc-name.
+      WHEN 'ZSD_AUTO_BLOCK_PARCIAL'.
+        gs_auart-auart = ls_tvarvc-low.
+        APPEND gs_auart TO gt_auart.
+      WHEN 'ZSD_AUTO_MOT_RECUSA'.
+        gs_abgru-abgru = ls_tvarvc-low.
+        APPEND gs_abgru TO gt_abgru.
+    ENDCASE.
+
+  ENDLOOP.
+
+
+  IF gt_auart IS NOT INITIAL.
+*    SELECT auart
+*           lfstk
+*           vbeln
+*           erdat
+*           ihrez
+*  FROM vbak
+*  INTO TABLE gt_vbak
+*  FOR ALL ENTRIES IN gt_auart
+*  WHERE vbeln IN so_vbeln
+*  AND  lfstk EQ 'B'
+*  AND  auart EQ gt_auart-auart
+*  AND ( erdat IN so_erdat )
+*  AND  ihrez EQ 'SOM'.
+
+    SELECT a~auart
+        a~lfstk
+        a~vbeln
+        a~erdat
+      FROM vbak AS a
+      INNER JOIN vbkd AS b
+      ON a~vbeln = b~vbeln
+      INTO TABLE gt_vbak
+      FOR ALL ENTRIES IN gt_auart
+      WHERE a~vbeln IN so_vbeln
+      AND a~lfstk EQ 'B'
+      AND  a~auart EQ gt_auart-auart
+      AND ( a~erdat IN so_erdat )
+      AND b~ihrez_e = 'SOM'.
+  ENDIF.
+
+  IF gt_vbak IS NOT INITIAL.
+    SELECT vbeln
+           posnr
+           abgru
+      FROM vbap
+      INTO TABLE gt_vbap
+      FOR ALL ENTRIES IN gt_vbak
+      WHERE vbeln = gt_vbak-vbeln.
+  ENDIF.
+
+ENDFORM.
+
+
+*&---------------------------------------------------------------------*
+*& Form processar_dados
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM processar_dados .
+
+  DATA: ls_order_header_inx TYPE bapisdh1x,
+        lv_sales_document   TYPE bapivbeln-vbeln,
+        lt_item             TYPE TABLE OF bapisditm,
+        ls_item             TYPE bapisditm,
+        lt_return           TYPE TABLE OF  bapiret2,
+        lt_item_inx         TYPE TABLE OF bapisditmx,
+        ls_item_inx         TYPE bapisditmx.
+
+  SORT: gt_vbap BY vbeln posnr,
+  gt_vbak BY vbeln.
+
+  READ TABLE gt_abgru INTO  gs_abgru INDEX 1.
+  LOOP AT gt_vbak INTO DATA(ls_vbak).
+    CLEAR: lt_item, lv_sales_document.
+    LOOP AT gt_vbap INTO DATA(ls_vbap) WHERE vbeln EQ ls_vbak-vbeln.
+      ls_item-itm_number = ls_vbap-posnr.
+      ls_item-reason_rej = gs_abgru-abgru.
+      APPEND ls_item TO lt_item.
+      ls_item_inx-itm_number = ls_vbap-posnr.
+      ls_item_inx-updateflag = 'U'.
+      ls_item_inx-reason_rej = abap_true.
+      APPEND  ls_item_inx  TO  lt_item_inx.
+    ENDLOOP.
+
+    lv_sales_document = ls_vbak-vbeln.
+    ls_order_header_inx-updateflag = 'U'.
+
+    CALL FUNCTION 'BAPI_SALESORDER_CHANGE'
+      EXPORTING
+        salesdocument    = lv_sales_document
+        order_header_inx = ls_order_header_inx
+      TABLES
+        return           = lt_return
+        order_item_in    = lt_item
+        order_item_inx   = lt_item_inx.
+
+    READ TABLE lt_return WITH KEY type = 'E' TRANSPORTING NO FIELDS.
+    IF sy-subrc IS INITIAL.
+      CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
+      LOOP AT lt_return INTO DATA(ls_return).
+        IF sy-batch = 'X'.
+          MESSAGE | { ls_vbak-vbeln } { ls_vbap-posnr }: { ls_return-message }| TYPE 'E'.
+        ELSE.
+          WRITE / | { ls_vbak-vbeln } { ls_vbap-posnr }: { ls_return-message }|.
+        ENDIF.
+      ENDLOOP.
+*     MESSAGE |Não foi possível inserir motivo de recusa: { gs_abgru-abgru } na OV { ls_vbak-vbeln } item { ls_vbap-posnr }| TYPE 'W'.
+    ELSE.
+      CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+        EXPORTING
+          wait = abap_true.
+      LOOP AT lt_return INTO ls_return.
+        IF sy-batch ='X'.
+          MESSAGE |{ ls_vbak-vbeln } { ls_vbap-posnr }: { ls_return-message }| TYPE 'S'.
+        ELSE.
+          WRITE / | { ls_vbak-vbeln } { ls_vbap-posnr }: { ls_return-message }|.
+        ENDIF.
+      ENDLOOP.
+*        MESSAGE  |Sucesso ao inserir motivo de recusa: { gs_abgru-abgru } na OV { ls_vbak-vbeln } item { ls_vbap-posnr }| TYPE 'S'.
+    ENDIF.
+  ENDLOOP.
+
+ENDFORM.
